@@ -1,5 +1,7 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react'
-import type { Annotation, Sample } from '../api/types'
+import type { Annotation, Conclusion, Sample } from '../api/types'
+import type { ConclusionDraft } from '../features/conclusion'
+import type { Role } from '../features/conclusion'
 
 export const samplingApi = createApi({
   reducerPath: 'samplingApi',
@@ -30,7 +32,24 @@ export const samplingApi = createApi({
       }),
       invalidatesTags: (_result, _error, { sampleId }) => [{ type: 'Sample', id: sampleId }],
     }),
+    commitConclusion: builder.mutation<
+      { sample: Sample; conclusion: Conclusion },
+      { sampleId: string; baseVersion: number; role: Role; conclusion: ConclusionDraft }
+    >({
+      query: ({ sampleId, baseVersion, role, conclusion }) => ({
+        url: `api/samples/${sampleId}/conclusions`,
+        method: 'POST',
+        body: { baseVersion, role, conclusion },
+      }),
+      invalidatesTags: (_result, _error, { sampleId }) => [{ type: 'Sample', id: sampleId }, 'Samples'],
+    }),
   }),
 })
 
-export const { useGetSamplesQuery, useGetSampleQuery, useAddAnnotationMutation, useAddCommentMutation } = samplingApi
+export const {
+  useGetSamplesQuery,
+  useGetSampleQuery,
+  useAddAnnotationMutation,
+  useAddCommentMutation,
+  useCommitConclusionMutation,
+} = samplingApi

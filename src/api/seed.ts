@@ -45,6 +45,8 @@ export const seedSamples: Sample[] = [
       { id: 'CM-01', author: '陈曼', content: '袖窿活动量比第一轮改善，但抬手仍会带动前片。', date: '09-27 15:20' },
       { id: 'CM-02', author: '周研', content: '建议先采纳肩线修正方案，第三轮再确认动态舒适度。', date: '09-27 17:05' },
     ],
+    version: 1,
+    conclusions: [],
   },
   {
     id: 'SMP-26021',
@@ -72,5 +74,7 @@ export const seedSamples: Sample[] = [
     ],
     attachments: [{ name: '第一轮背片.jpg', type: '样衣照片', owner: '陈曼' }],
     comments: [],
+    version: 1,
+    conclusions: [],
   },
 ]

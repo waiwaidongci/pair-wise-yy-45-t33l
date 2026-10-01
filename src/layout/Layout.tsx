@@ -20,6 +20,7 @@ import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined'
 import CompareArrowsOutlinedIcon from '@mui/icons-material/CompareArrowsOutlined'
 import HistoryOutlinedIcon from '@mui/icons-material/HistoryOutlined'
 import CloudDoneOutlinedIcon from '@mui/icons-material/CloudDoneOutlined'
+import MigrationBanner from '../components/MigrationBanner'
 
 const nav = [
   { to: '/', label: '开发总览', icon: <DashboardOutlinedIcon /> },
@@ -88,6 +89,9 @@ export default function Layout() {
         </Drawer>
       </Box>
       <Box component="main" sx={{ flex: 1, minWidth: 0, pt: { xs: '52px', md: 0 } }}>
+        <Box sx={{ px: { xs: 1.5, md: 2.5 }, pt: { xs: 1.5, md: 2 } }}>
+          <MigrationBanner />
+        </Box>
         <Outlet />
       </Box>
     </Box>

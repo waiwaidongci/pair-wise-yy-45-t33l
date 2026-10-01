@@ -19,6 +19,8 @@ import {
   TableHead,
   TableRow,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material'
@@ -26,10 +28,27 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined'
 import AddLocationAltOutlinedIcon from '@mui/icons-material/AddLocationAltOutlined'
 import PhotoCameraBackOutlinedIcon from '@mui/icons-material/PhotoCameraBackOutlined'
+import LockClockOutlinedIcon from '@mui/icons-material/LockClockOutlined'
 import { useAppDispatch, useAppSelector } from '../app/hooks'
-import { decideProposal, saveDraft, setRounds, toggleAnnotation } from '../features/developmentSlice'
+import {
+  adoptServerVersion,
+  clearConflict,
+  clearVersionIssue,
+  decideProposal,
+  rebaseOntoServer,
+  saveDraft,
+  setRounds,
+  switchRole,
+  toggleAnnotation,
+  updateMeasurement,
+} from '../features/developmentSlice'
+import { fingerprint, recomputeOutOfTolerance, ROUNDS } from '../features/conclusion'
+import type { Role, Sample } from '../api/types'
+import { useCommitConclusion } from '../features/useCommitConclusion'
+import ConflictDialog from '../components/ConflictDialog'
+import VersionIssueBanner from '../components/VersionIssueBanner'
 
-const rounds = ['第一轮', '第二轮', '第三轮'] as const
+const rounds = ROUNDS
 
 export default function SampleReviewPage() {
   const dispatch = useAppDispatch()
@@ -40,6 +59,10 @@ export default function SampleReviewPage() {
   const [decisionReason, setDecisionReason] = useState('')
   const [annotationDraft, setAnnotationDraft] = useState({ x: 50, y: 42, part: '版型', content: '' })
   const imageRef = useRef<HTMLDivElement>(null)
+
+  const { commitConclusion, isCommitting } = useCommitConclusion()
+  const conflict = state.conflict
+  const versionIssue = state.versionIssue
 
   const comparison = useMemo(() => {
     const a = sample.measurements[state.roundA]
@@ -52,6 +75,22 @@ export default function SampleReviewPage() {
       inTolerance: Math.abs(b[index].actual - b[index].spec) <= b[index].tolerance,
     }))
   }, [sample, state.roundA, state.roundB])
+
+  const currentFingerprint = useMemo(
+    () => fingerprint(sample.measurements[state.roundB]),
+    [sample.measurements, state.roundB],
+  )
+  const outOfToleranceKeys = useMemo(
+    () => recomputeOutOfTolerance(sample.measurements[state.roundB]),
+    [sample.measurements, state.roundB],
+  )
+  const outOfToleranceNames = outOfToleranceKeys.map(
+    (key) => sample.measurements[state.roundB].find((item) => item.key === key)?.name ?? key,
+  )
+  const isStale =
+    state.committedFingerprints[sample.id] != null &&
+    currentFingerprint !== state.committedFingerprints[sample.id]
+  const frozenCount = sample.conclusions.filter((item) => item.status === '已冻结').length
 
   const handleImageClick = (event: React.MouseEvent<HTMLDivElement>) => {
     if (state.locked) return
@@ -72,21 +111,101 @@ export default function SampleReviewPage() {
     setDecisionReason('')
   }
 
+  const handleCommit = async () => {
+    await commitConclusion({
+      sample,
+      round: state.roundB,
+      baselineRound: state.roundA,
+      decisions: state.decisions,
+      note: state.draftNotes[sample.id] ?? '',
+      status: '已确认',
+    })
+  }
+
+  const handleRetryVersionIssue = async () => {
+    if (!versionIssue) return
+    await commitConclusion({
+      sample,
+      round: versionIssue.yourDraft.round,
+      baselineRound: versionIssue.yourDraft.baselineRound,
+      decisions: state.decisions,
+      note: versionIssue.yourDraft.note,
+      status: versionIssue.yourDraft.status,
+    })
+  }
+
+  const handleAdoptServerVersion = () => {
+    dispatch(adoptServerVersion())
+  }
+
+  const handleSaveAsNewVersion = async () => {
+    if (!conflict) return
+    const { serverSample, yourDraft } = conflict
+    const rebased: Sample = {
+      ...serverSample,
+      measurements: {
+        ...serverSample.measurements,
+        [yourDraft.round]: yourDraft.measurements.map((item) => ({ ...item })),
+      },
+    }
+    dispatch(rebaseOntoServer())
+    await commitConclusion({
+      sample: rebased,
+      round: yourDraft.round,
+      baselineRound: yourDraft.baselineRound,
+      decisions: yourDraft.decisions,
+      note: yourDraft.note,
+      status: yourDraft.status,
+    })
+  }
+
   return (
     <Box className="page">
       <Box className="page-head">
         <Box>
           <Typography className="eyebrow">SAMPLE REVIEW / 样品评审</Typography>
-          <Typography component="h1" fontWeight={800}>{sample.styleCode} · 轮次对比</Typography>
-          <Typography color="text.secondary">尺寸差异超过容差自动高亮；图片批注与修改方案绑定到具体轮次。</Typography>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+            <Typography component="h1" fontWeight={800}>{sample.styleCode} · 轮次对比</Typography>
+            <Chip size="small" label={`当前版本 v${sample.version}`} color="primary" variant="outlined" />
+            {frozenCount > 0 && <Chip size="small" icon={<LockClockOutlinedIcon />} label={`已有 ${frozenCount} 个冻结版本`} color="success" />}
+          </Stack>
+          <Typography color="text.secondary">尺寸差异超过容差自动高亮；量体改动后旧认可失效，按新数字重算超差部位。</Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+          <ToggleButtonGroup
+            size="small"
+            value={state.activeRole}
+            exclusive
+            onChange={(_event, value: Role | null) => {
+              if (value) dispatch(switchRole(value))
+            }}
+          >
+            {(['版师', '产品'] as Role[]).map((role) => (
+              <ToggleButton key={role} value={role}>
+                {role}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
           <Button variant="outlined" startIcon={<PhotoCameraBackOutlinedIcon />}>上传样衣照片</Button>
-          <Button variant="contained" disabled={state.locked} onClick={() => dispatch(saveDraft({ sampleId: sample.id, notes: '评审草稿已保存' }))}>保存当前草稿</Button>
+          <Button variant="outlined" disabled={state.locked} onClick={() => dispatch(saveDraft({ sampleId: sample.id, notes: '评审草稿已保存' }))}>保存当前草稿</Button>
+          <Button variant="contained" disabled={state.locked || isCommitting} onClick={handleCommit}>
+            提交版型确认
+          </Button>
         </Stack>
       </Box>
 
-      {state.locked && <Alert severity="success" sx={{ mb: 1.5 }}>该轮次已审核锁定。解锁后才能新增批注或采纳方案。</Alert>}
+      <VersionIssueBanner issue={versionIssue} busy={isCommitting} onRetry={handleRetryVersionIssue} onDismiss={() => dispatch(clearVersionIssue())} />
+      {state.locked && <Alert severity="success" sx={{ mb: 1.5 }}>该轮次已审核锁定。解锁后新增调整将另存为新版本，不覆盖冻结版。</Alert>}
+      {isStale && (
+        <Alert severity="warning" sx={{ mb: 1.5 }}>
+          量体数字已变更，先前按旧数字认可的改版办法已失效。请按新数字确认超差部位与方案后重新提交版型结论。
+        </Alert>
+      )}
+      {frozenCount > 0 && !state.locked && (
+        <Alert severity="info" sx={{ mb: 1.5 }}>
+          已存在冻结版本（v{sample.conclusions[sample.conclusions.length - 1]?.version}）。本次调整将另存为新结论，冻结版保持原样、不可覆盖。
+        </Alert>
+      )}
       {sample.annotations.some((item) => item.status === '待处理') && (
         <Alert severity="warning" sx={{ mb: 1.5 }}>
           当前仍有 {sample.annotations.filter((item) => item.status === '待处理').length} 项待处理批注，审核锁定前必须逐项关闭。
@@ -120,7 +239,7 @@ export default function SampleReviewPage() {
                   <TableCell>规格</TableCell>
                   <TableCell>±容差</TableCell>
                   <TableCell>{state.roundA}</TableCell>
-                  <TableCell>{state.roundB}</TableCell>
+                  <TableCell>{state.roundB}（实测可改）</TableCell>
                   <TableCell>变化</TableCell>
                   <TableCell>判定</TableCell>
                 </TableRow>
@@ -132,7 +251,22 @@ export default function SampleReviewPage() {
                     <TableCell>{item.spec} cm</TableCell>
                     <TableCell>±{item.tolerance}</TableCell>
                     <TableCell>{item.previous.toFixed(1)}</TableCell>
-                    <TableCell sx={{ fontWeight: 800, color: item.inTolerance ? '#2d7665' : '#b44b2d' }}>{item.current.toFixed(1)}</TableCell>
+                    <TableCell>
+                      <TextField
+                        type="number"
+                        size="small"
+                        variant="standard"
+                        value={item.current}
+                        disabled={state.locked}
+                        onChange={(event) => {
+                          const value = parseFloat(event.target.value)
+                          if (Number.isFinite(value)) {
+                            dispatch(updateMeasurement({ sampleId: sample.id, round: state.roundB, key: item.key, actual: value }))
+                          }
+                        }}
+                        sx={{ width: 78, '& input': { fontWeight: 800, color: item.inTolerance ? '#2d7665' : '#b44b2d' } }}
+                      />
+                    </TableCell>
                     <TableCell>
                       <Chip size="small" label={`${item.delta >= 0 ? '+' : ''}${item.delta.toFixed(1)}`} color={Math.abs(item.delta) > 0.5 ? 'warning' : 'default'} />
                     </TableCell>
@@ -143,6 +277,14 @@ export default function SampleReviewPage() {
                 ))}
               </TableBody>
             </Table>
+          </Box>
+          <Box sx={{ px: 2, py: 1, borderTop: '1px solid #ece9e4', display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+            <Typography fontSize={12} color="text.secondary">按当前量体重算超差部位：</Typography>
+            {outOfToleranceNames.length === 0 ? (
+              <Chip size="small" label="全部达标" color="success" />
+            ) : (
+              outOfToleranceNames.map((name) => <Chip key={name} size="small" label={name} color="error" />)
+            )}
           </Box>
           <Box sx={{ p: 1.5, borderTop: '1px solid #ece9e4' }}>
             <TextField
@@ -289,6 +431,15 @@ export default function SampleReviewPage() {
           <Button variant="contained" disabled={!decisionReason.trim()} startIcon={<CheckCircleOutlineIcon />} onClick={() => submitDecision('已采纳')}>采纳方案</Button>
         </DialogActions>
       </Dialog>
+
+      <ConflictDialog
+        open={Boolean(conflict)}
+        conflict={conflict}
+        busy={isCommitting}
+        onClose={() => dispatch(clearConflict())}
+        onAdopt={handleAdoptServerVersion}
+        onSaveAsNewVersion={handleSaveAsNewVersion}
+      />
     </Box>
   )
 }
