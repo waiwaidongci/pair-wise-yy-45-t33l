@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import {
   AppBar,
+  Alert,
   Box,
+  Button,
   Chip,
   Drawer,
   IconButton,
@@ -20,6 +22,8 @@ import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined'
 import CompareArrowsOutlinedIcon from '@mui/icons-material/CompareArrowsOutlined'
 import HistoryOutlinedIcon from '@mui/icons-material/HistoryOutlined'
 import CloudDoneOutlinedIcon from '@mui/icons-material/CloudDoneOutlined'
+import { useAppDispatch, useAppSelector } from '../app/hooks'
+import { dismissMigration, retryLegacyMigration } from '../features/patternSlice'
 
 const nav = [
   { to: '/', label: '开发总览', icon: <DashboardOutlinedIcon /> },
@@ -29,6 +33,8 @@ const nav = [
 ]
 
 export default function Layout() {
+  const dispatch = useAppDispatch()
+  const migration = useAppSelector((root) => root.pattern.migration)
   const [mobileOpen, setMobileOpen] = useState(false)
   const drawer = (
     <Box sx={{ width: 242, minHeight: '100%', bgcolor: '#262a2b', color: '#eef1ef' }}>
@@ -88,6 +94,48 @@ export default function Layout() {
         </Drawer>
       </Box>
       <Box component="main" sx={{ flex: 1, minWidth: 0, pt: { xs: '52px', md: 0 } }}>
+        {migration.phase === 'upgraded' && (
+          <Alert severity="success" sx={{ borderRadius: 0 }} onClose={() => dispatch(dismissMigration())}>
+            旧版数据已兼容升级：{migration.message}
+          </Alert>
+        )}
+        {(migration.phase === 'unversioned' || migration.phase === 'corrupt') && (
+          <Alert
+            severity="warning"
+            sx={{ borderRadius: 0 }}
+            action={
+              <>
+                <Chip size="small" label="原记录已保全到 recovery 键" variant="outlined" sx={{ mr: 1 }} />
+                <span>
+                  <Button
+                    color="inherit"
+                    size="small"
+                    onClick={() => {
+                      const blob = new Blob([migration.raw], { type: 'application/json' })
+                      const url = URL.createObjectURL(blob)
+                      const link = document.createElement('a')
+                      link.href = url
+                      link.download = `版型结论原始记录-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`
+                      link.click()
+                      URL.revokeObjectURL(url)
+                    }}
+                  >
+                    下载原记录
+                  </Button>
+                  <Button color="inherit" size="small" variant="outlined" sx={{ ml: 1 }} onClick={() => dispatch(retryLegacyMigration())}>
+                    重试升级
+                  </Button>
+                  <Button color="inherit" size="small" onClick={() => dispatch(dismissMigration())} sx={{ ml: 0.5 }}>
+                    稍后处理
+                  </Button>
+                </span>
+              </>
+            }
+          >
+            {migration.phase === 'unversioned' ? '旧数据读不到版本号' : '旧数据内容无法解析'}（{migration.reason}
+            ）：为避免覆盖，原记录已原样保全，当前以默认数据运行，可重试升级或先下载留存。
+          </Alert>
+        )}
         <Outlet />
       </Box>
     </Box>
